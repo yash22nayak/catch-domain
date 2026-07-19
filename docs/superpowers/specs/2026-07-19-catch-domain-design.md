@@ -43,6 +43,21 @@ structured cleanly enough to grow into one later, but nothing is built for that 
 - Default TLDs: `.com, .in, .io, .tech, .dev, .agency` (overridable via `--tlds`).
 - Resolves → domain is registered and active. Record it; skip RDAP for this combo.
 
+### Stage 1.5 — Lookalike discovery via Certificate Transparency (free, wildcard)
+- One wildcard query per base name: `https://crt.sh/?q=%25<name>%25&output=json`.
+  Certificate Transparency logs record every HTTPS certificate ever issued, and
+  crt.sh supports SQL-LIKE `%` wildcards — so this finds *real existing* lookalike
+  domains (`enlancesolutions.com`, `techenlance.in`, …), not just guessed ones.
+- Parse the JSON, extract distinct registrable domains containing the name,
+  dedupe (a cert's `name_value` may list several hosts), record as evidence.
+- Noise guard: skip this stage (with a console warning) for names shorter than
+  5 characters — substring matching on short names is mostly false positives
+  (e.g. `flint` → `flintstonecars.com`).
+- Complementary, not a replacement: CT only sees domains that ever had an HTTPS
+  cert, so the generated-variant checks (Stages 1–2) still catch cert-less
+  parked domains.
+- crt.sh is free and often slow: generous timeout, one retry, then `unknown`.
+
 ### Stage 2 — RDAP registration check (free, official)
 - For combos that did NOT resolve, query RDAP (official WHOIS successor, no key):
   - Use the rdap.org bootstrap redirect (`https://rdap.org/domain/<domain>`).
@@ -77,6 +92,7 @@ Rank names by a risk score (lower = safer). Initial weights (tunable in `config.
 | Variant live website (any TLD) | +10 |
 | Variant registered on `.com` | +6 |
 | Variant registered on other TLD | +3 |
+| Distinct lookalike domain found via CT logs (Stage 1.5) | +3 each (cap +15) |
 | DDG hit matching base name (exact name token appears in the hit's title or URL) | +5 each (cap +30) |
 | DDG hit matching a variant (same rule) | +2 each (cap +10) |
 | Any check returned `unknown` | +2 each |
@@ -114,6 +130,7 @@ catch_domain/
   config.py        # TLDs, variant lists, scoring weights, delays
   variants.py      # normalization + variant expansion
   dns_check.py     # Stage 1
+  ct_check.py      # Stage 1.5 (crt.sh wildcard lookalike discovery)
   rdap_check.py    # Stage 2
   liveness.py      # Stage 2b
   search_check.py  # Stage 3 (ddgs)
@@ -132,6 +149,8 @@ names.txt          # user's candidate list (example committed)
 - DDG throttling → search status `pending` for remaining names, run continues.
 - RDAP per-TLD failures fall back through the rdap.org bootstrap; still `unknown`
   on total failure.
+- crt.sh timeout or bad response → one retry, then `unknown`; run continues with
+  the other evidence sources.
 - Malformed input lines (spaces, uppercase, punctuation) are normalized, not rejected;
   empty file or unreadable file → clear error message.
 
