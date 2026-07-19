@@ -9,10 +9,20 @@ PREFIXES = ["get", "my", "the"]
 SEARCH_VARIANT_COUNT = 2   # how many suffix variants get their own DDG query
 MIN_CT_NAME_LEN = 5        # skip crt.sh wildcard search for shorter names
 
+DOMAIN_WORKERS = 12        # concurrent domain probes per name
+
+# TLDs missing from IANA's RDAP bootstrap file, which would otherwise fall back
+# to the rdap.org proxy and get rate-limited (HTTP 429) under concurrency.
+RDAP_OVERRIDES = {
+    "io": "https://rdap.identitydigital.services/rdap",
+}
+RDAP_RETRIES = 1           # extra attempts when a registry answers 429
+RDAP_BACKOFF = 1.0         # seconds to wait before a retry
+
 DNS_TIMEOUT = 5.0
 HTTP_TIMEOUT = 8.0
-CT_TIMEOUT = 30.0
-RDAP_DELAY = 0.5           # seconds between RDAP requests
+CT_TIMEOUT = 20.0
+RDAP_DELAY = 0.0           # extra pause per RDAP request; DOMAIN_WORKERS caps the rate
 SEARCH_DELAY = 3.0         # seconds between DDG queries
 
 USER_AGENT = "catch-domain/0.1 (personal brand-name research tool)"

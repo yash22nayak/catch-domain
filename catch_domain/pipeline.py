@@ -1,5 +1,6 @@
 """Orchestrates all check stages for one candidate name (cheap checks first)."""
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from catch_domain import (config, ct_check, dns_check, liveness, rdap_check,
                           scoring, search_check)
@@ -15,7 +16,8 @@ def _probe_domain(domain: str) -> str:
         return "live" if liveness.liveness(domain) == "live" else "registered"
     if dns_result == "unknown":
         return "unknown"
-    time.sleep(config.RDAP_DELAY)
+    if config.RDAP_DELAY:
+        time.sleep(config.RDAP_DELAY)
     return rdap_check.registration_status(domain)
 
 
@@ -53,14 +55,18 @@ def _search(cache: Cache, query: str) -> tuple[list[dict], str]:
 def check_name(name: str, cache: Cache, do_search: bool = True) -> NameResult:
     result = NameResult(name=name)
 
-    for label in expand(name):
-        is_base = label == name
-        for tld in config.TLDS:
-            domain = f"{label}.{tld}"
-            result.domains.append(
-                DomainStatus(domain, tld, is_base, _domain_status(cache, domain)))
+    targets = [(f"{label}.{tld}", tld, label == name)
+               for label in expand(name) for tld in config.TLDS]
 
-    result.lookalikes, result.ct_status = _ct_lookalikes(cache, name)
+    # Every probe is a blocking network round trip, so they overlap; crt.sh is
+    # independent of them and rides along. pool.map keeps the input order.
+    with ThreadPoolExecutor(max_workers=config.DOMAIN_WORKERS) as pool:
+        ct_future = pool.submit(_ct_lookalikes, cache, name)
+        statuses = list(pool.map(lambda t: _domain_status(cache, t[0]), targets))
+        result.lookalikes, result.ct_status = ct_future.result()
+
+    result.domains = [DomainStatus(domain, tld, is_base, status)
+                      for (domain, tld, is_base), status in zip(targets, statuses)]
 
     # Provisional verdict decides whether the expensive search stage runs at all.
     _, provisional = scoring.score_name(result)

@@ -1,5 +1,6 @@
 """JSON-file cache so reruns only perform checks that are new."""
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -11,15 +12,20 @@ class Cache:
     def __init__(self, path: Path, refresh: bool = False):
         self.path = Path(path)
         self._data: dict[str, dict] = {}
+        self._lock = threading.Lock()  # probes read and write it from worker threads
         if not refresh and self.path.exists():
             self._data = json.loads(self.path.read_text(encoding="utf-8"))
 
     def get(self, key: str) -> Any | None:
-        entry = self._data.get(key)
+        with self._lock:
+            entry = self._data.get(key)
         return entry["value"] if entry else None
 
     def set(self, key: str, value: Any) -> None:
-        self._data[key] = {"value": value, "ts": time.time()}
+        with self._lock:
+            self._data[key] = {"value": value, "ts": time.time()}
 
     def save(self) -> None:
-        self.path.write_text(json.dumps(self._data, indent=1), encoding="utf-8")
+        with self._lock:
+            payload = json.dumps(self._data, indent=1)
+        self.path.write_text(payload, encoding="utf-8")
