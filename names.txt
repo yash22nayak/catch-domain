@@ -1,0 +1,4 @@
+# catch-domain candidate list — one name per line, '#' starts a comment.
+# Replace these examples with your own candidates.
+zetavolve
+flintlogic
